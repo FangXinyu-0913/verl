@@ -125,3 +125,6 @@ log
 outputs
 generate_data/*
 plots/*
+*.png
+*.whl
+*.svg
