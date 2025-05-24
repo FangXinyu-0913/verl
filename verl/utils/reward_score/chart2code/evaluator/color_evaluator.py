@@ -9,7 +9,8 @@ sys.path.append(os.environ["PROJECT_PACK_PATH"])
 import matplotlib.pyplot as plt
 import eval_configs.global_config as gloabl_config
 
-import re
+import re,pathlib
+from pathlib import Path
 
 from skimage.color import deltaE_cie76
 from skimage.color import rgb2lab
@@ -21,6 +22,27 @@ from colormath.color_conversions import convert_color
 from colormath.color_diff import delta_e_cie2000
 
 from multiprocessing import Process
+from concurrent.futures import ThreadPoolExecutor   # or just串行
+
+from scipy.optimize import linear_sum_assignment
+import numpy as np
+
+def _similarity_matrix(shorter, longer):
+    # 计算 |shorter|×|longer| 的相似度矩阵，并取 (1-sim) 作为 cost
+    mat = np.zeros((len(shorter), len(longer)))
+    for i, c1 in enumerate(shorter):
+        for j, c2 in enumerate(longer):
+            mat[i, j] = 1 - calculate_similarity_single(c1, c2)
+    return mat
+
+def calculate_similarity_hungarian(lst1, lst2):
+    if not lst1 or not lst2:
+        return 0.0
+    shorter, longer = (lst1, lst2) if len(lst1) <= len(lst2) else (lst2, lst1)
+    cost = _similarity_matrix(shorter, longer)
+    row_ind, col_ind = linear_sum_assignment(cost)
+    total = (1 - cost[row_ind, col_ind]).sum()         # 把 cost 再映射回相似度
+    return total / len(shorter)
 
 def group_color(color_list):
     color_dict = {}
@@ -35,6 +57,13 @@ def group_color(color_list):
             color_dict[chart_type].append(color)
 
     return color_dict
+
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def _hex_to_lab(hex_color: str):
+    rgb = hex_to_rgb(hex_color)
+    return rgb_to_lab(rgb)
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
@@ -55,19 +84,10 @@ def rgb_to_lab(rgb):
 
 def calculate_similarity_single(c1, c2):
     if c1.startswith("#") and c2.startswith("#"):
-        # c1 = rgb2lab(np.array([hex_to_rgb(c1)]))
-        # c2 = rgb2lab(np.array([hex_to_rgb(c2)]))
-        c1 = hex_to_rgb(c1)
-        c2 = hex_to_rgb(c2)
-        lab1 = rgb_to_lab(c1)
-        lab2 = rgb_to_lab(c2)
-        # return max(0, 1 - deltaE_cie76(c1, c2)[0] / 100)
-        return max(0, 1 - (delta_e_cie2000(lab1, lab2)/100) )
-    elif not c1.startswith("#") and not c2.startswith("#"):
-
-        return 1 if c1 == c2 else 0
-    else:
-        return 0
+        lab1 = _hex_to_lab(c1)
+        lab2 = _hex_to_lab(c2)
+        return max(0, 1 - delta_e_cie2000(lab1, lab2) / 100)
+    return 1.0 if c1 == c2 else 0.0
 
 def calculate_similarity_for_permutation(args):
     shorter, perm = args
@@ -84,21 +104,25 @@ class ColorEvaluator:
         }
 
     def __call__(self, generation_code_file, golden_code_file):
-        print("genearion_code_file", generation_code_file)
-        # print("golden_code_file", golden_code_file)
-
 
         self.golden_code_file = golden_code_file
 
-        generation_colors = self._log_colors(generation_code_file)
-        golden_colors = self._log_colors(golden_code_file)
+        with ThreadPoolExecutor(max_workers=2) as tp:   # GIL 影响可以忽略
+            gen_fut  = tp.submit(self._log_colors, generation_code_file)
+            gold_fut = tp.submit(self._log_colors, golden_code_file)
+            generation_colors = gen_fut.result()
+            golden_colors     = gold_fut.result()
+
         
         self._calculate_metrics(generation_colors, golden_colors)
 
-        redunant_file = os.environ["PROJECT_STORE_PATH"] + "/" + os.path.basename(golden_code_file).replace(".py", ".pdf")
-        if os.path.exists(redunant_file):
-            os.remove(redunant_file)
-        # print(self.metrics)
+        redundant_pdf = (
+            Path(os.environ["PROJECT_STORE_PATH"])
+            / Path(golden_code_file).with_suffix(".pdf").name
+        )
+        if redundant_pdf.exists():
+            redundant_pdf.unlink()
+
 
 
     def _log_colors(self, code_file):
@@ -227,7 +251,7 @@ class ColorEvaluator:
             max_set_similarity = 0
 
             for color in merged_color_group:
-                max_set_similarity += calculate_similarity_parallel(group_generation_colors[color], group_golden_colors[color])
+                max_set_similarity += calculate_similarity_hungarian(group_generation_colors[color], group_golden_colors[color])
 
             # self.metrics["similarity"] = calculate_similarity_parallel(generation_colors, golden_colors)
             # max_set_similarity = calculate_similarity_parallel(generation_colors, golden_colors)

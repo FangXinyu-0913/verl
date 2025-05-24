@@ -43,13 +43,6 @@ def extract_python_blocks(text: str) -> list[str]:
 
     return code_blocks
 
-def _write_tmp(code: str, prefix: str) -> str:
-    "写到 /dev/shm，训练结束自动清理"
-    tmp = tempfile.NamedTemporaryFile(dir="/dev/shm", suffix=".py",
-                                      prefix=prefix, delete=False,
-                                      mode="w", encoding="utf8")
-    tmp.write(code); tmp.flush(); tmp.close()
-    return tmp.name
 
 def _run_eval(mod_path: str, cls_name: str, kwargs: dict,
               gen_file: str, gold_file: str):
@@ -81,13 +74,19 @@ def compute_score(model_output: str, ground_truth: dict) -> float:
         _POOL.submit(_run_eval, mod, cls, kw, gen_file, gold_file)
         for (mod, cls, kw) in EVAL_CONFIG
     ]
-    f1s = [f.result() for f in futures if f.result() is not None]
+    scores = []                      # 只保存非 None 的分数
+    for (mod, cls, kw), fut in zip(EVAL_CONFIG, futures):
+        score = fut.result()         # 只调用一次
+        if score is None:
+            continue
+        scores.append(score)
+        print(f"{mod}-{cls}-{kw}: {score:.4f}")   # 逐项打印
 
     # 删除临时文件
     try: os.unlink(gen_file); os.unlink(gold_file)
     except FileNotFoundError: pass
 
-    return float(np.mean(f1s)) if f1s else 0.0
+    return float(np.mean(scores)) if scores else 0.0
 
         
 ## original init file

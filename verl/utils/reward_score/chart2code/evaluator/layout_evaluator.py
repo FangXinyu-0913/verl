@@ -3,11 +3,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import sys
+import sys,pathlib
+from pathlib import Path
 sys.path.append(os.environ["PROJECT_PACK_PATH"])
 
 import matplotlib.pyplot as plt
 import eval_configs.global_config as gloabl_config
+from concurrent.futures import ThreadPoolExecutor   # or just串行
 
 class LayoutEvaluator:
 
@@ -19,14 +21,19 @@ class LayoutEvaluator:
         }
 
     def __call__(self, generation_code_file, golden_code_file):
-        generation_layouts = self._log_layouts(generation_code_file)
-        golden_layouts = self._log_layouts(golden_code_file)
+        with ThreadPoolExecutor(max_workers=2) as tp:
+            fut_gen  = tp.submit(self._log_layouts, generation_code_file)
+            fut_gold = tp.submit(self._log_layouts, golden_code_file)
+            generation_layouts, golden_layouts = fut_gen.result(), fut_gold.result()
         
         self._calculate_metrics(generation_layouts, golden_layouts)
 
-        redunant_file = os.environ["PROJECT_STORE_PATH"] + "/" + os.path.basename(golden_code_file).replace(".py", ".pdf")
-        if os.path.exists(redunant_file):
-            os.remove(redunant_file)
+        redundant_pdf = (
+            Path(os.environ["PROJECT_STORE_PATH"])
+            / Path(golden_code_file).with_suffix(".pdf").name
+        )
+        if redundant_pdf.exists():
+            redundant_pdf.unlink()
 
         # print(self.metrics)
 
@@ -66,41 +73,20 @@ class LayoutEvaluator:
 
         return texts
 
-    def _calculate_metrics(self, generation_layouts: List[Tuple], golden_layouts: List[Tuple]):
-        """
-        Calculate the metrics
+    def _calculate_metrics(self, generation_layouts, golden_layouts):
+        if not generation_layouts or not golden_layouts:
+            self.metrics = dict.fromkeys(self.metrics, 0.0); return
 
-        Args:
-            - generation_layouts: List of tuples of texts, [(x, y, x_rel, y_rel, text), ...]
-            - golden_layouts: List of tuples of texts, [(x, y, x_rel, y_rel, text), ...]
-        """
-        try:
-            if len(generation_layouts) == 0 or len(golden_layouts) == 0:
-                self.metrics["precision"] = 0
-                self.metrics["recall"] = 0
-                self.metrics["f1"] = 0
-                return
+        # 把 dict → tuple(sorted(...)) 后再做集合交集
+        freeze = lambda d: tuple(sorted(d.items()))
+        gen_set  = set(map(freeze, generation_layouts))
+        gold_set = set(map(freeze, golden_layouts))
 
-            len_generation = len(generation_layouts)
-            len_golden = len(golden_layouts)
-
-            n_correct = 0
-            for t in golden_layouts:
-                if t in generation_layouts:
-                    n_correct += 1
-                    generation_layouts.remove(t)
-
-            self.metrics["precision"] = n_correct / len_generation
-            self.metrics["recall"] = n_correct / len_golden
-            if self.metrics["precision"] + self.metrics["recall"] == 0:
-                self.metrics["f1"] = 0
-            else:
-                self.metrics["f1"] = 2 * self.metrics["precision"] * self.metrics["recall"] / (self.metrics["precision"] + self.metrics["recall"])
-
-            return
-        except:
-            self.metrics["f1"] = None
-            return
+        n_correct = len(gen_set & gold_set)
+        prec = n_correct / len(gen_set)
+        rec  = n_correct / len(gold_set)
+        f1   = 0.0 if not (prec or rec) else 2*prec*rec/(prec+rec)
+        self.metrics.update(precision=prec, recall=rec, f1=f1)
 
     def _get_prefix(self):
         return f"""

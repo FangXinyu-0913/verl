@@ -42,12 +42,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.n=5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=20 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    +actor_rollout_ref.ref.fsdp_config.model_dtype=bf16 \
+    +actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.logger="['console','wandb']" \
-    trainer.project_name='verl_qwen2_5_vl_7b_chart2code_0522' \
-    trainer.experiment_name='verl_qwen2_5_vl_7b_chart2code_0522' \
+    trainer.project_name='verl_qwen2_5_vl_7b_chart2code_0522_NEW' \
+    trainer.experiment_name='verl_qwen2_5_vl_7b_chart2code_0522_NEW' \
     trainer.n_gpus_per_node=8 \
+    trainer.val_before_train=False \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=10 \
