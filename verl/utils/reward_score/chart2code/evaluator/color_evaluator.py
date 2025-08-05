@@ -15,6 +15,9 @@ from pathlib import Path
 from skimage.color import deltaE_cie76
 from skimage.color import rgb2lab
 import numpy as np
+# Monkey patch numpy to add asscalar if it's missing
+if not hasattr(np, 'asscalar'):
+    np.asscalar = lambda a: a.item()
 from itertools import permutations
 from multiprocessing import Pool, cpu_count
 from colormath.color_objects import sRGBColor, LabColor
@@ -26,6 +29,43 @@ from concurrent.futures import ThreadPoolExecutor   # or just串行
 
 from scipy.optimize import linear_sum_assignment
 import numpy as np
+
+import subprocess
+import time
+import os
+import signal
+import psutil
+
+
+# 注意：这个函数应该放在你的其他辅助函数旁边
+def calculate_similarity_hungarian_gemini(lst1: List[str], lst2: List[str]) -> float:
+    """
+    使用匈牙利算法计算两组颜色之间的最大总相似度。
+    """
+    if not lst1 or not lst2:
+        return 0.0
+
+    # 确保 lst1 是较短或等长的列表
+    if len(lst1) > len(lst2):
+        lst1, lst2 = lst2, lst1
+
+    # 创建成本矩阵。linear_sum_assignment 求的是最小成本，
+    # 所以我们的成本是 (1 - 相似度)。
+    cost_matrix = np.zeros((len(lst1), len(lst2)))
+    for i, c1 in enumerate(lst1):
+        for j, c2 in enumerate(lst2):
+            similarity = calculate_similarity_single(c1, c2)
+            cost_matrix[i, j] = 1 - similarity
+
+    # 使用匈牙利算法找到成本最低的匹配
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+    # 从成本计算回总相似度
+    # cost_matrix[row_ind, col_ind] 是最优匹配下的成本列表
+    # (1 - cost) 就是相似度
+    max_total_similarity = (1 - cost_matrix[row_ind, col_ind]).sum()
+    
+    return max_total_similarity
 
 def _similarity_matrix(shorter, longer):
     # 计算 |shorter|×|longer| 的相似度矩阵，并取 (1-sim) 作为 cost
@@ -143,7 +183,11 @@ class ColorEvaluator:
         with open(code_log_texts_file, 'w') as f:
             f.write(code)
         
-        os.system(f"python3 {code_log_texts_file}")
+        # os.system(f"python3 {code_log_texts_file}")
+        from .utils import execute_python_with_timeout
+
+        execute_python_with_timeout(code_log_texts_file)
+
 
         if os.path.exists(output_file) == True:
             with open(output_file, 'r') as f:
@@ -153,7 +197,7 @@ class ColorEvaluator:
         else:
             colors = []
 
-        os.remove(code_log_texts_file)                        
+        # os.remove(code_log_texts_file)                        
         
         # pdf_file = re.findall(r"plt\.savefig\('(.*)'\)", code)
         # if len(pdf_file) != 0:
@@ -165,46 +209,8 @@ class ColorEvaluator:
 
     def _calculate_metrics(self, generation_colors: List[Tuple], golden_colors: List[Tuple]):
         try:
-            generation_colors = list(generation_colors)
-            golden_colors = list(golden_colors)
-
             group_generation_colors = group_color(generation_colors)
             group_golden_colors = group_color(golden_colors)
-
-            # print("group_generation_colors", group_generation_colors)
-            # print("group_golden_colors", group_golden_colors)
-            
-
-            # print("generation_colors", generation_colors)
-            # print("golden_colors", golden_colors)
-
-            def calculate_similarity_serial(lst1, lst2):
-                if len(lst1) == 0 or len(lst2) == 0:
-                    return 0
-
-                shorter, longer = (lst1, lst2) if len(lst1) <= len(lst2) else (lst2, lst1)
-
-                max_total_similarity = float('-inf')
-                best_index = None
-
-                for perm in permutations(longer, len(shorter)):
-                    current_similarity = sum( calculate_similarity_single(c1, c2) for c1, c2 in zip(shorter, perm) )
-                    current_similarity /= len(shorter)
-                    
-                    if current_similarity > max_total_similarity:
-                        max_total_similarity = current_similarity
-                        best_index = [shorter, perm]
-
-                # best_index[0] = sorted(best_index[0])
-                # best_index[1] = sorted(best_index[1])
-                # print("best_index", best_index)
-                for i1, i2 in zip(best_index[0], best_index[1]):
-                    print(i1, i2)
-                tmp_similarity = sum( calculate_similarity_single(c1, c2) for c1, c2 in zip(best_index[0], best_index[1]) ) / len(shorter)
-                print("tmp_similarity", tmp_similarity)
-
-                return max_total_similarity
-
 
             def calculate_similarity_parallel(lst1, lst2):
                 if len(lst1) == 0 or len(lst2) == 0:
@@ -217,56 +223,34 @@ class ColorEvaluator:
                 with Pool(processes=cpu_count()) as pool:
                     similarities = pool.map(calculate_similarity_for_permutation, [(shorter, perm) for perm in perms])
 
-
-                # print("length of similarities", len(similarities))
-
-                # indexes = [item[0] for item in similarities]
-                # similarities = [item[1] for item in similarities]
-
-                # get max similarity and its index
-                # max_total_similarity = max(similarities)
-                # max_index = similarities.index(max_total_similarity)
-                # index = indexes[max_index]
-
-                # max_total_similarity = max(similarities)
-                # index[0] = sorted(index[0])
-                # index[1] = sorted(index[1])
-                # for i1, i2 in zip(index[0], index[1]):
-                    # print(i1, i2)
-
-                # tmp_similarity = sum( calculate_similarity_single(c1, c2) for c1, c2 in zip(index[0], index[1]) ) / len(shorter)
-                # print("tmp_similarity", tmp_similarity)
-                # print("best_index", index)
-
                 return max(similarities)
 
             # merge keys in group_generation_colors and group_golden_colors
-            merged_color_group = list( set( list(group_generation_colors.keys()) + list(group_golden_colors.keys()) ) )
-            for color in merged_color_group:
-                if color not in group_generation_colors:
-                    group_generation_colors[color] = []
-                if color not in group_golden_colors:
-                    group_golden_colors[color] = []
+            # merged_color_group = list( set( list(group_generation_colors.keys()) + list(group_golden_colors.keys()) ) )
+            merged_color_group = set(group_generation_colors.keys()) | set(group_golden_colors.keys())
+
             
-            max_set_similarity = 0
+            total_max_similarity = 0.0
 
-            for color in merged_color_group:
-                max_set_similarity += calculate_similarity_hungarian(group_generation_colors[color], group_golden_colors[color])
+            for group_key in merged_color_group:
+                gen_list = group_generation_colors.get(group_key, [])
+                gold_list = group_golden_colors.get(group_key, [])
+                
+                # 使用新的、高效的匈牙利算法函数
+                total_max_similarity += calculate_similarity_hungarian(gen_list, gold_list)
 
-            # self.metrics["similarity"] = calculate_similarity_parallel(generation_colors, golden_colors)
-            # max_set_similarity = calculate_similarity_parallel(generation_colors, golden_colors)
-            self.metrics["precision"] = max_set_similarity / len(generation_colors) if len(generation_colors) != 0 else 0
-            if "box" in self.golden_code_file:
-                self.metrics["recall"] = max_set_similarity / len(golden_colors) if len(golden_colors) != 0 else 0
-            else:
-                self.metrics["recall"] = max_set_similarity / len(golden_colors)
+            # 使用计算出的总相似度来计算 precision 和 recall
+            self.metrics["precision"] = total_max_similarity / len(generation_colors) if generation_colors else 0.0
+            self.metrics["recall"] = total_max_similarity / len(golden_colors) if golden_colors else 0.0
+            
+            # F1 score 计算保持不变
             if self.metrics["precision"] + self.metrics["recall"] == 0:
-                self.metrics["f1"] = 0
+                self.metrics["f1"] = 0.0
             else:
                 self.metrics["f1"] = 2 * self.metrics["precision"] * self.metrics["recall"] / (self.metrics["precision"] + self.metrics["recall"])
-
             return
-        except:
+        except Exception as e:
+            print(f"Error in calculating color metrics: {e}")
             self.metrics["f1"] = None
             return
 
@@ -274,106 +258,13 @@ class ColorEvaluator:
         with open(os.environ["PROJECT_PACK_PATH"]+"/evaluator/color_evaluator_prefix.py", "r") as f:
             prefix = f.read()
         return prefix
-#     def _get_prefix(self):
-#         return f"""
-# import warnings
-# warnings.filterwarnings("ignore", category=UserWarning)
 
-# import sys
-# sys.path.append('{os.environ['PROJECT_PACK_PATH']}')
-
-# import matplotlib.pyplot as plt
-# import numpy as np
-# from matplotlib.axes._base import _process_plot_var_args
-# from matplotlib.axes._axes import Axes
-# import matplotlib.colors as mcolors
-# import inspect
-
-# drawed_colors = []
-
-# def convert_color_to_hex(color):
-#     'Convert color from name, RGBA, or hex to a hex format.'
-#     try:
-#         # First, try to convert from color name to RGBA to hex
-#         if isinstance(color, str):
-#             # Check if it's already a hex color (start with '#' and length either 7 or 9)
-#             if color.startswith('#') and (len(color) == 7 or len(color) == 9):
-#                 return color.upper()
-#             else:
-#                 return mcolors.to_hex(mcolors.to_rgba(color)).upper()
-#         # Then, check if it's in RGBA format
-#         elif isinstance(color, (list, tuple)) and len(color) == 4:
-#             return mcolors.to_hex(color).upper()
-#         else:
-#             raise ValueError("Unsupported color format")
-#     except ValueError as e:
-#         print(color)
-#         print("Error converting color:", e)
-#         return None
-
-# def log_function(func):
-#     def wrapper(*args, **kwargs):
-#         global drawed_colors
-
-#         func_name = inspect.getfile(func) + "/" + func.__name__
-        
-#         result = func(*args, **kwargs)
-
-#         if func.__name__ == "_makeline":
-#             color = convert_color_to_hex(result[1]["color"])
-#             drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "axhline":
-#             color = convert_color_to_hex(result.get_color())
-#             drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "axvline":
-#             color = convert_color_to_hex(result.get_color())
-#             drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "_fill_between_x_or_y":
-#             color = convert_color_to_hex(list(result.get_facecolors()[0]))
-#             drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "bar":
-#             for item in result:
-#                 color = convert_color_to_hex( list(item._original_facecolor))
-#                 drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "scatter":
-#             # check whether cmap is used
-#             if "cmap" in kwargs and kwargs["cmap"] is not None:
-#                 print( "cmap is used", kwargs["cmap"] )
-#                 drawed_colors.append( func_name + "--" + kwargs["cmap"] )
-#             else:
-#                 color = convert_color_to_hex(list(result.get_facecolor()[0]))
-#                 drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "pie":
-#             for item in result[0]:
-#                 color = convert_color_to_hex( item.get_facecolor() )
-#                 drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "axvspan":
-#             color = convert_color_to_hex(result.get_facecolor())
-#             drawed_colors.append( func_name + "--" + color )
-#         elif func.__name__ == "axhspan":
-#             color = convert_color_to_hex(result.get_facecolor())
-#             drawed_colors.append( func_name + "--" + color )
-#         return result
-    
-#     return wrapper
-
-# _process_plot_var_args._makeline = log_function(_process_plot_var_args._makeline)
-# Axes.bar = log_function(Axes.bar)
-# Axes.scatter = log_function(Axes.scatter)
-# Axes.axhline = log_function(Axes.axhline)
-# Axes.axvline = log_function(Axes.axvline)
-# Axes._fill_between_x_or_y = log_function(Axes._fill_between_x_or_y)
-# Axes.pie = log_function(Axes.pie)
-# Axes.axvspan = log_function(Axes.axvspan)
-# Axes.axhspan = log_function(Axes.axhspan)
-# """
     
     def _get_suffix(self, output_file):
         return f"""
 drawed_colors = list(set(drawed_colors))
-drawed_colors = update_drawed_colors(drawed_objects)
 if len(drawed_colors) > 10:
-    drawed_colors = filter_color(drawed_colors)
+    drawed_colors = filter_color_optimized(drawed_colors)
 # print("drawed_colors", drawed_colors)
 # print("len(drawed_colors)", len(drawed_colors))
 # print("Length of drawed_obejcts", len(drawed_objects))

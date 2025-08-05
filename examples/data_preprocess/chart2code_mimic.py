@@ -35,34 +35,20 @@ def valid_image(example):
         print(f"can not open {os.path.join(args.original_dir, image_path)}")
         return False
 
-import re
-
-def remove_tail(text: str) -> str:
-    """
-    Remove 'I will provide you with the accurate data from the picture.' 
-    and everything after it.
-    """
-    pattern = r"I will provide you with the accurate data from the picture\..*"
-    return re.sub(pattern, "", text, flags=re.DOTALL)
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local_dir", default="~/data/chart2code")
-    parser.add_argument("--original_dir", default="/fs-computility/mllm1/shared/hub/datasets--xxxllz--Chart2Code-160k")
+    parser.add_argument("--local_dir", default="~/data/chart2code_mimic")
+    parser.add_argument("--original_dir", default="/fs-computility/mllm1/fangxinyu/plot2code/ChartMimic/dataset")
     parser.add_argument("--hdfs_dir", default=None)
-    parser.add_argument("--no_data", default=False)
 
     args = parser.parse_args()
 
-    data_source = "xxxllz/Chart2Code-160k"
+    data_source = "ChartMimic/ChartMimic"
 
     dataset = {}
-    # dataset['train'] = json.load(open(os.path.join(args.original_dir,'get_chart_type','chart2code_16k_verl_train_annotated_filtered_extracted_data.json'),'r'))
-    # dataset['test'] = json.load(open(os.path.join(args.original_dir,'get_chart_type','chart2code_16k_verl_test_annotated_filtered_extracted_data.json'),'r'))
+    dataset['train'] = json.load(open(os.path.join(args.original_dir,'train_direct_mimic.json'),'r'))
+    dataset['test'] = json.load(open(os.path.join(args.original_dir,'test_direct_mimic.json'),'r'))
 
-    dataset['train'] = json.load(open(os.path.join(args.original_dir,'get_chart_type','chart2code_rollout_3kNew_train_data.json'),'r'))
-    dataset['test'] = json.load(open(os.path.join(args.original_dir,'get_chart_type','chart2code_rollout_3kNew_test_data.json'),'r'))
-    
     train_dataset_lst = dataset["train"]
     test_dataset_lst = dataset["test"]
 
@@ -77,20 +63,11 @@ if __name__ == "__main__":
     train_dataset = train_dataset.filter(valid_image, num_proc=8)
     test_dataset = test_dataset.filter(valid_image, num_proc=8)
 
-    def make_map_fn(split, no_data):
+    def make_map_fn(split):
         def process_fn(example, idx):
             conv = example['conversations']
             prompt = [x['value'] for x in conv if x['from'] == 'human'][0]
-            py_file = example['gt_py']
-            with open(py_file, 'r') as f:
-                answer = f.read()
-            answer = "```python " + answer + "\n```"
-            print(answer)
-            # answer = [x['value'] for x in conv if x['from'] == 'gpt'][0]
-
-            # if no_data:
-            #     prompt = remove_tail(prompt)
-            #     print(prompt)
+            answer = [x['value'] for x in conv if x['from'] == 'gpt'][0]
 
 
             image_path = example.pop("image")
@@ -130,14 +107,14 @@ if __name__ == "__main__":
 
         return process_fn
 
-    train_dataset = train_dataset.map(function=make_map_fn("train", args.no_data), with_indices=True, num_proc=8)
-    test_dataset = test_dataset.map(function=make_map_fn("test", args.no_data), with_indices=True, num_proc=8)
+    train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True, num_proc=8)
+    test_dataset = test_dataset.map(function=make_map_fn("test"), with_indices=True, num_proc=8)
 
     local_dir = args.local_dir
     hdfs_dir = args.hdfs_dir
 
-    train_dataset.to_parquet(os.path.join(local_dir, f"train_no_data_{args.no_data}_rollout3k.parquet"))
-    test_dataset.to_parquet(os.path.join(local_dir, f"test_no_data_{args.no_data}_rollout3k.parquet"))
+    train_dataset.to_parquet(os.path.join(local_dir, "train.parquet"))
+    test_dataset.to_parquet(os.path.join(local_dir, "test.parquet"))
 
     if hdfs_dir is not None:
         makedirs(hdfs_dir)

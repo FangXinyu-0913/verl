@@ -52,7 +52,10 @@ class LegendEvaluator:
         with open(code_log_texts_file, 'w') as f:
             f.write(code)
         
-        os.system(f"python3 {code_log_texts_file}")
+        # os.system(f"python3 {code_log_texts_file}")
+        from .utils import execute_python_with_timeout
+        execute_python_with_timeout(code_log_texts_file)
+
 
         with open(output_file, 'r') as f:
             texts = f.read()
@@ -126,9 +129,26 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 import sys
 sys.path.append('{os.environ['PROJECT_PACK_PATH']}')
-import eval_configs.global_config as global_config
-global_config.reset_texts()
+
+# Try to import and reset global_config, but don't fail if it's not available
+try:
+    import eval_configs.global_config as global_config
+    global_config.reset_texts()
+except ImportError:
+    # If global_config is not available, continue without it
+    pass
+
+# Import different renderers for various output formats
 from matplotlib.backends.backend_pdf import RendererPdf
+from matplotlib.backends.backend_agg import RendererAgg
+try:
+    from matplotlib.backends.backend_svg import RendererSVG
+except ImportError:
+    RendererSVG = None
+try:
+    from matplotlib.backends.backend_ps import RendererPS
+except ImportError:
+    RendererPS = None
 
 drawed_legend_texts = []
 drawed_texts = []
@@ -149,7 +169,13 @@ def log_function(func):
 
     return wrapper
 
-RendererPdf.draw_text = log_function(RendererPdf.draw_text)
+# Hook multiple renderers to support different output formats
+RendererPdf.draw_text = log_function(RendererPdf.draw_text)  # PDF format
+RendererAgg.draw_text = log_function(RendererAgg.draw_text)  # PNG, JPG, etc.
+if RendererSVG is not None:
+    RendererSVG.draw_text = log_function(RendererSVG.draw_text)  # SVG format
+if RendererPS is not None:
+    RendererPS.draw_text = log_function(RendererPS.draw_text)  # PS/EPS format
 """
     
     def _get_suffix(self, output_file):

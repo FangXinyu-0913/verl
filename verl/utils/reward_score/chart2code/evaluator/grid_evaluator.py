@@ -107,9 +107,26 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 import sys
 sys.path.append('{os.environ['PROJECT_PACK_PATH']}')
-import eval_configs.global_config as global_config
-global_config.reset_texts()
+
+# Try to import and reset global_config, but don't fail if it's not available
+try:
+    import eval_configs.global_config as global_config
+    global_config.reset_texts()
+except ImportError:
+    # If global_config is not available, continue without it
+    pass
+
+# Import different renderers for various output formats
 from matplotlib.backends.backend_pdf import RendererPdf
+from matplotlib.backends.backend_agg import RendererAgg
+try:
+    from matplotlib.backends.backend_svg import RendererSVG
+except ImportError:
+    RendererSVG = None
+try:
+    from matplotlib.backends.backend_ps import RendererPS
+except ImportError:
+    RendererPS = None
 
 grid_visibility = []
 """

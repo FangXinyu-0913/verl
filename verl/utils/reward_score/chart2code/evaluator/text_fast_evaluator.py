@@ -14,8 +14,25 @@ def _hook(func):
         xr=x/obj.width/72*100; yr=y/obj.height/72*100
         drawed_texts.append((x,y,xr,yr,s)); return func(*a,**kw)
     return w
+
+# Import and hook multiple renderers for different output formats
 from matplotlib.backends.backend_pdf import RendererPdf
-RendererPdf.draw_text=_hook(RendererPdf.draw_text)
+from matplotlib.backends.backend_agg import RendererAgg
+try:
+    from matplotlib.backends.backend_svg import RendererSVG
+except ImportError:
+    RendererSVG = None
+try:
+    from matplotlib.backends.backend_ps import RendererPS
+except ImportError:
+    RendererPS = None
+
+RendererPdf.draw_text=_hook(RendererPdf.draw_text)  # PDF format
+RendererAgg.draw_text=_hook(RendererAgg.draw_text)  # PNG, JPG, etc.
+if RendererSVG is not None:
+    RendererSVG.draw_text=_hook(RendererSVG.draw_text)  # SVG format
+if RendererPS is not None:
+    RendererPS.draw_text=_hook(RendererPS.draw_text)  # PS/EPS format
 """)
 
 _AXS_DEL = "for ax in plt.gcf().get_axes(): ax.set_xticks([]); ax.set_yticks([]);"

@@ -74,7 +74,7 @@ def compute_score(model_output: str, ground_truth: dict) -> float:
         _POOL.submit(_run_eval, mod, cls, kw, gen_file, gold_file)
         for (mod, cls, kw) in EVAL_CONFIG
     ]
-    scores = []                      # 只保存非 None 的分数
+    scores = []                  # 只保存非 None 的分数
     for (mod, cls, kw), fut in zip(EVAL_CONFIG, futures):
         score = fut.result()         # 只调用一次
         if score is None:
@@ -88,7 +88,6 @@ def compute_score(model_output: str, ground_truth: dict) -> float:
 
     return float(np.mean(scores)) if scores else 0.0
 
-        
 ## original init file
 # import re
 # import os

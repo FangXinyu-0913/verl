@@ -8,7 +8,8 @@ sys.path.append(os.environ["PROJECT_PACK_PATH"])
 
 import matplotlib.pyplot as plt
 import eval_configs.global_config as gloabl_config
-
+from concurrent.futures import ThreadPoolExecutor
+import time
 import re
 
 class ChartTypeEvaluator:
@@ -21,8 +22,11 @@ class ChartTypeEvaluator:
         }
     
     def __call__(self, generation_code_file, golden_code_file):
-        generation_chart_types = self._get_chart_types(generation_code_file)
-        golden_chart_types = self._get_chart_types(golden_code_file)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_gen = executor.submit(self._get_chart_types, generation_code_file)
+            future_gold = executor.submit(self._get_chart_types, golden_code_file)
+            generation_chart_types = future_gen.result()
+            golden_chart_types = future_gold.result()
 
         self.golden_code_file = golden_code_file
 
@@ -49,7 +53,9 @@ class ChartTypeEvaluator:
         with open(code_log_chart_types_file, "w") as f:
             f.write(code)
 
-        os.system(f"python {code_log_chart_types_file}")
+        # os.system(f"python {code_log_chart_types_file}")
+        from .utils import execute_python_with_timeout
+        execute_python_with_timeout(code_log_chart_types_file)
 
         if os.path.exists(output_file) == True:
             with open(output_file, "r") as f:
@@ -58,7 +64,7 @@ class ChartTypeEvaluator:
             os.remove(output_file)
         else:
             chart_types = {}
-        os.remove(code_log_chart_types_file)
+        # os.remove(code_log_chart_types_file)
         
         # pdf_file = re.findall(r"plt\.savefig\('(.*)'\)", code)
         # if len(pdf_file) != 0:

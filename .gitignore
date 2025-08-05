@@ -128,3 +128,5 @@ plots/*
 *.png
 *.whl
 *.svg
+*.pdf
+*.jpg

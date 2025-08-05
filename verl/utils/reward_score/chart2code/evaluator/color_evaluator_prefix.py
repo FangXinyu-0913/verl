@@ -8,11 +8,12 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 import sys
 sys.path.append(f'{os.environ["PROJECT_PACK_PATH"]}')
-
+import numpy as np
+if not hasattr(np, 'asscalar'):
+    np.asscalar = lambda a: a.item()
 import networkx
 import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
 import networkx as nx
 from matplotlib.axes._base import _process_plot_var_args
 from matplotlib.axes._axes import Axes
@@ -24,6 +25,7 @@ from matplotlib.image import NonUniformImage
 from matplotlib.patches import Ellipse,Circle
 from matplotlib_venn._common import VennDiagram
 import inspect
+from evaluator.color_utils import filter_color
 from colormath.color_objects import sRGBColor, LabColor
 from colormath.color_conversions import convert_color
 from colormath.color_diff import delta_e_cie2000
@@ -82,6 +84,45 @@ def filter_color(color_list):
         else:
             filtered_color_list.append(color_list[i])
     # print("Filtered color list: ", filtered_color_list)
+    return filtered_color_list
+
+def filter_color_optimized(color_list):
+    if not color_list:
+        return []
+
+    # 1. 预计算：一次性将所有 HEX 颜色转换为 LAB 颜色对象
+    lab_colors = []
+    for color_str in color_list:
+        hex_val = color_str.split("--")[1]
+        # 跳过非十六进制颜色（如 "viridis" 等 colormap 名称）
+        if hex_val.startswith("#"):
+            lab_colors.append((color_str, rgb_to_lab(hex_to_rgb(hex_val))))
+        else:
+            # 对于 colormap 名称等，直接保留
+            lab_colors.append((color_str, None))
+
+    filtered_color_list = [lab_colors[0][0]]  # 第一个颜色直接放入
+    filtered_lab_objects = [lab_colors[0][1]] # 也保存其LAB对象
+
+    # 2. 循环比较时使用预计算好的 LAB 对象
+    for original_str, current_lab in lab_colors[1:]:
+        if current_lab is None: # 如果是 colormap 名称，直接添加
+            put_in = True
+        else:
+            put_in = True
+            for existing_lab in filtered_lab_objects:
+                if existing_lab is None:
+                    continue
+                # 直接使用LAB对象计算，避免了重复的转换
+                similarity = max(0, 1 - (delta_e_cie2000(current_lab, existing_lab) / 100))
+                if similarity > 0.7:
+                    put_in = False
+                    break
+        
+        if put_in:
+            filtered_color_list.append(original_str)
+            filtered_lab_objects.append(current_lab)
+            
     return filtered_color_list
 
 def convert_color_to_hex(color):

@@ -127,8 +127,7 @@ class DataParallelPPOActor(BasePPOActor):
                     attention_mask=None,
                     position_ids=position_ids_rmpad,
                     **multi_modal_inputs,
-                    use_cache=False,
-                    temperature=temperature,
+                    use_cache=False
                 )  # prevent model thinks we are generating
 
                 if self.use_fused_kernels:
@@ -195,8 +194,7 @@ class DataParallelPPOActor(BasePPOActor):
                     attention_mask=attention_mask,
                     position_ids=position_ids,
                     **multi_modal_inputs,
-                    use_cache=False,
-                    temperature=temperature,
+                    use_cache=False
                 )  # prevent model thinks we are generating
 
                 if self.use_fused_kernels:

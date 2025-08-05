@@ -22,6 +22,16 @@ import inspect
 
 called_functions = {}
 in_decorator = False
+# 在脚本顶部导入
+from functools import lru_cache
+
+# 创建一个带缓存的辅助函数
+@lru_cache(maxsize=None)
+def get_function_path(func):
+    """
+    获取并缓存函数的文件路径，避免重复调用 inspect.getfile()。
+    """
+    return inspect.getfile(func)
 
 def log_function_specific_for_draw_networkx_labels(func):
     def wrapper(
@@ -45,7 +55,7 @@ def log_function_specific_for_draw_networkx_labels(func):
         if in_decorator == False:
             in_decorator = True
 
-            file_name = inspect.getfile(func) + "/" + func.__name__
+            file_name = get_function_path(func) + "/" + func.__name__
             name = file_name + "-" + func.__name__
             called_functions[name] = called_functions.get(name, 0) + 1
 
@@ -115,7 +125,7 @@ def log_function_specific_for_draw_networkx_edges(func):
         if in_decorator == False:
             in_decorator = True
 
-            file_name = inspect.getfile(func) + "/" + func.__name__
+            file_name = get_function_path(func) + "/" + func.__name__
             name = file_name + "-" + func.__name__
             called_functions[name] = called_functions.get(name, 0) + 1
 
@@ -195,7 +205,7 @@ def log_function_specific_for_draw_networkx_nodes(func):
         if in_decorator == False:
             in_decorator = True
 
-            file_name = inspect.getfile(func) + "/" + func.__name__
+            file_name = get_function_path(func) + "/" + func.__name__
             name = file_name + "-" + func.__name__
             called_functions[name] = called_functions.get(name, 0) + 1
 
@@ -244,11 +254,12 @@ def log_function(func):
         global in_decorator
         if not in_decorator:
             in_decorator = True
+            # 使用我们新的、带缓存的函数！
+            file_name = get_function_path(func)
+
             if len(args) > 0 and type(args[0]) == PolarAxes and func.__name__ == "plot":
-                file_name = inspect.getfile(func)
                 file_name += "_polar"
-            else:
-                file_name = inspect.getfile(func)
+
             name = file_name + "-" + func.__name__
             called_functions[name] = called_functions.get(name, 0) + 1
             result = func(*args, **kwargs)

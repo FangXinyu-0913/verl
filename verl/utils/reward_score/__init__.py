@@ -62,7 +62,7 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
         from . import geo3k
 
         res = geo3k.compute_score(solution_str, ground_truth)
-    elif data_source in ['xxxllz/Chart2Code-160k']:
+    elif data_source in ['xxxllz/Chart2Code-160k','ChartMimic/ChartMimic']:
         from . import chart2code
 
         res = chart2code.compute_score(solution_str, ground_truth)

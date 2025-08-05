@@ -4,8 +4,10 @@ load_dotenv()
 import os
 import sys
 sys.path.append(os.environ["PROJECT_PACK_PATH"])
-
-
+import ast
+from .utils import execute_python_with_timeout
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 class TextEvaluator:
 
@@ -19,9 +21,17 @@ class TextEvaluator:
         self.use_axs = use_axs
 
     def __call__(self, generation_code_file, golden_code_file):
-        generation_texts = self._log_texts(generation_code_file)
-        golden_texts = self._log_texts(golden_code_file)
         
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # 提交两个任务到线程池，它们会立即开始执行
+            future_gen = executor.submit(self._log_texts, generation_code_file)
+            future_gold = executor.submit(self._log_texts, golden_code_file)
+            
+            # .result() 会等待该任务完成，并返回其结果
+            # 这两行代码会确保在继续下一步之前，两个任务都已完成
+            generation_texts = future_gen.result()
+            golden_texts = future_gold.result()
+
         self._calculate_metrics(generation_texts, golden_texts)
 
         redunant_file = os.environ["PROJECT_STORE_PATH"] + "/" + os.path.basename(golden_code_file).replace(".py", ".pdf")
@@ -54,17 +64,17 @@ class TextEvaluator:
         code_log_texts_file = code_file.replace(".py", "_log_texts.py")
         with open(code_log_texts_file, 'w') as f:
             f.write(code)
-        
-        os.system(f"python3 {code_log_texts_file}")
+        execute_python_with_timeout(code_log_texts_file)
+
 
         if os.path.exists(output_file) == True:
             with open(output_file, 'r') as f:
                 texts = f.read()
-                texts = eval(texts)
+                texts = ast.literal_eval(texts)
             os.remove(output_file)
         else:
             texts = []
-        os.remove(code_log_texts_file)
+        # os.remove(code_log_texts_file)
         
         # pdf_file = re.findall(r"plt\.savefig\('(.*)'\)", code)
         # if len(pdf_file) != 0:
@@ -137,9 +147,26 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 import sys
 sys.path.append('{os.environ['PROJECT_PACK_PATH']}')
-import eval_configs.global_config as global_config
-global_config.reset_texts()
+
+# Try to import and reset global_config, but don't fail if it's not available
+try:
+    import eval_configs.global_config as global_config
+    global_config.reset_texts()
+except ImportError:
+    # If global_config is not available, continue without it
+    pass
+
+# Import different renderers for various output formats
 from matplotlib.backends.backend_pdf import RendererPdf
+from matplotlib.backends.backend_agg import RendererAgg
+try:
+    from matplotlib.backends.backend_svg import RendererSVG
+except ImportError:
+    RendererSVG = None
+try:
+    from matplotlib.backends.backend_ps import RendererPS
+except ImportError:
+    RendererPS = None
 
 drawed_texts = []
 
@@ -154,12 +181,18 @@ def log_function(func):
         y_rel = ( y / object.height / 72 ) * 100
         s = args[4]
 
-        drawed_texts.append( (x, y, x_rel, y_rel, s) )
+        drawed_texts.append( (float(x), float(y), float(x_rel), float(y_rel), s) )
         return func(*args, **kwargs)
 
     return wrapper
 
-RendererPdf.draw_text = log_function(RendererPdf.draw_text)
+# Hook multiple renderers to support different output formats
+RendererPdf.draw_text = log_function(RendererPdf.draw_text)  # PDF format
+RendererAgg.draw_text = log_function(RendererAgg.draw_text)  # PNG, JPG, etc.
+if RendererSVG is not None:
+    RendererSVG.draw_text = log_function(RendererSVG.draw_text)  # SVG format
+if RendererPS is not None:
+    RendererPS.draw_text = log_function(RendererPS.draw_text)  # PS/EPS format
 """
     
     def _get_suffix(self, output_file):
