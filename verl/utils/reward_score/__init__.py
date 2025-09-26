@@ -102,6 +102,10 @@ def default_compute_score(
 
         res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
 
+    elif data_source in ['xxxllz/Chart2Code-160k','ChartMimic/ChartMimic']:
+        from . import chart2code
+
+        res = chart2code.compute_score(solution_str, ground_truth)
     else:
         raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
 

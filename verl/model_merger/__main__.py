@@ -71,3 +71,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # from .fsdp_model_merger import FSDPModelMerger
+    # from .base_model_merger import ModelMergerConfig
+    # config = ModelMergerConfig(
+    #     operation="merge",
+    #     backend="fsdp",
+    #     local_dir="/fs-computility/mllm1/fangxinyu/plot2code/New_Verl/verl/checkpoints/verl_grpo_chart2code/qwen2_5_vl_7b_scratch_6reward_Prime_ReNew/global_step_130/actor",
+    #     target_dir="/fs-computility/mllm1/fangxinyu/plot2code/New_Verl/verl/checkpoints/verl_grpo_chart2code/qwen2_5_vl_7b_scratch_6reward_Prime_ReNew/6reward_initial_130step_val067"
+    # )
+    # merger = FSDPModelMerger(config)
+    # merger.merge_and_save()
