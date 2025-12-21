@@ -14,6 +14,7 @@
 # from . import gsm8k, math, prime_math, prime_code
 
 from verl.utils.import_utils import deprecated
+import time
 
 
 def default_compute_score(
@@ -41,10 +42,39 @@ def default_compute_score(
     Raises:
         NotImplementedError: If the reward function is not implemented for the given data source.
     """
+    # print(f'dddddddddata source: {data_source}')
+    print(f'solution str in reward_score init.py: {solution_str[:400] + '...(truncated)...' + solution_str[-400:] if len(solution_str) > 800 else solution_str}')
+    # time.sleep(300)
+
     if data_source == "openai/gsm8k":
         from . import gsm8k
 
         res = gsm8k.compute_score(solution_str, ground_truth)
+    elif data_source == "unsplash/jigsaw" or data_source == "unsplash/jigsaw_sixteen":
+        from . import jigsaw
+
+        res = jigsaw.compute_score(solution_str, ground_truth)
+    elif data_source == "unsplash/jigsaw_with_tool":
+        from . import jigsaw_with_tool
+
+        res = jigsaw_with_tool.compute_score(solution_str, ground_truth, extra_info)
+    elif data_source == "unsplash/jigsaw_with_restore_tool_16pieces":
+        from . import jigsaw_with_restore_tool
+
+        res = jigsaw_with_restore_tool.compute_score(solution_str, ground_truth, extra_info)
+    elif data_source == "unsplash/jigsaw_shape_analysis":
+        from . import jigsaw_shape_analysis
+
+        res = jigsaw_shape_analysis.compute_score(solution_str, ground_truth) 
+    elif data_source == "unsplash/jigsaw_shape_analysis_single":
+        from . import jigsaw_shape_analysis
+        res = jigsaw_shape_analysis.compute_score_single(solution_str, ground_truth)
+
+    elif data_source == "unsplash/jigsaw_output_coordinate_dict":
+        from . import jigsaw_output_coordinate_dict
+        res = jigsaw_output_coordinate_dict.compute_score(solution_str, ground_truth)
+
+
     elif data_source in ["lighteval/MATH", "DigitalLearningGmbH/MATH-lighteval", "HuggingFaceH4/MATH-500"]:
         from . import math_reward
 

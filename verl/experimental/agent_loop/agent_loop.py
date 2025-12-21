@@ -493,16 +493,73 @@ class AgentLoopWorkerBase:
         multi_modal_inputs = None
         if self.processor is not None:
             images = getattr(output, "multi_modal_data", {}).get("image", None)
+            
+            # 优先使用 tool_agent_loop 传递过来的 image_grid_thw，避免重新计算导致 shape mismatch
+            # if "image_grid_thw" in output.extra_fields or "video_grid_thw" in output.extra_fields:
+            #     multi_modal_inputs = {}
+                
+            #     # 首先统计 input_ids 中实际存在的图片/视频数量
+            #     # 因为 response_ids 可能被截断，导致部分图片 token 被截掉
+            #     vision_start_token_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+            #     image_token_id = self.processor.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+            #     video_token_id = self.processor.tokenizer.convert_tokens_to_ids("<|video_pad|>")
+                
+            #     flat_input_ids = input_ids.squeeze(0)
+            #     # 只考虑有效的 token（attention_mask == 1）
+            #     valid_input_ids = flat_input_ids[attention_mask.squeeze(0) == 1]
+                
+            #     # 统计完整的图片数量：找到 <|vision_start|> 后面紧跟 <|image_pad|> 的位置
+            #     vision_start_indices = (valid_input_ids == vision_start_token_id).nonzero(as_tuple=True)[0]
+            #     n_images = 0
+            #     n_videos = 0
+            #     for idx in vision_start_indices:
+            #         if idx + 1 < len(valid_input_ids):
+            #             next_token = valid_input_ids[idx + 1].item()
+            #             if next_token == image_token_id:
+            #                 n_images += 1
+            #             elif next_token == video_token_id:
+            #                 n_videos += 1
+                
+            #     # 根据实际图片数量截断 image_grid_thw
+            #     if "image_grid_thw" in output.extra_fields:
+            #         grid = output.extra_fields["image_grid_thw"]
+            #         if len(grid) > n_images:
+            #             logger.warning(f"Truncating image_grid_thw from {len(grid)} to {n_images} due to response truncation.")
+            #             grid = grid[:n_images]
+            #         multi_modal_inputs["image_grid_thw"] = grid if len(grid) > 0 else None
+                    
+            #     if "video_grid_thw" in output.extra_fields:
+            #         grid = output.extra_fields["video_grid_thw"]
+            #         if len(grid) > n_videos:
+            #             logger.warning(f"Truncating video_grid_thw from {len(grid)} to {n_videos} due to response truncation.")
+            #             grid = grid[:n_videos]
+            #         multi_modal_inputs["video_grid_thw"] = grid if len(grid) > 0 else None
+                    
+            #     if "second_per_grid_ts" in output.extra_fields:
+            #         ts = output.extra_fields["second_per_grid_ts"]
+            #         if len(ts) > n_videos:
+            #             ts = ts[:n_videos]
+            #         multi_modal_inputs["second_per_grid_ts"] = ts if len(ts) > 0 else None
+                
+            #     # 还需要处理 pixel_values（从 images 重新获取，因为 grid 不包含像素数据）
+            #     # 同样需要截断到实际存在的图片数量
+            #     if images is not None and n_images > 0:
+            #         truncated_images = images[:n_images] if isinstance(images, list) else [images][:n_images]
+            #         if truncated_images:
+            #             pixel_inputs = self.processor.image_processor(images=truncated_images, return_tensors="pt")
+            #             if "pixel_values" in pixel_inputs:
+            #                 multi_modal_inputs["pixel_values"] = pixel_inputs["pixel_values"]
+            # else:
+                # 回退到旧逻辑：重新计算（可能导致 shape mismatch，但保持兼容性）
             current_text = self.tokenizer.decode(input_ids.squeeze(0), skip_special_tokens=True)
             multi_modal_inputs = self.processor(text=[current_text], images=images, return_tensors="pt")
             multi_modal_inputs.pop("input_ids", None)
             multi_modal_inputs.pop("attention_mask", None)
-
             # We must use dict(multi_modal_inputs) to convert BatchFeature values to a new dict
             # because np.array() only keeps the keys for BatchFeature.
             multi_modal_inputs = dict(multi_modal_inputs.convert_to_tensors("pt"))
         if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-            from verl.models.transformers.qwen2_vl import get_rope_index
+            from verl.models.transformers.qwen3_vl import get_rope_index
 
             image_grid_thw = multi_modal_inputs.get("image_grid_thw")
             video_grid_thw = multi_modal_inputs.get("video_grid_thw")
@@ -549,6 +606,11 @@ class AgentLoopWorkerBase:
                 non_tensor_batch=non_tensor_batch,
             )
             result = await self.reward_manager_worker.compute_score.remote(data)
+            # for pure iteraction with no tool invoked
+            # if output.extra_fields['turn_scores'] is not None and len(output.extra_fields['turn_scores']) > 0 and len(output.extra_fields['tool_rewards']) == 0:
+            #     output.reward_score = result["reward_score"] + 2 - len(output.extra_fields['turn_scores'])
+            #     print('end of agent loop, calculate reward score: ', output.reward_score, 'turn_scores: ', output.extra_fields['turn_scores'])
+            # else:
             output.reward_score = result["reward_score"]
             output.extra_fields["reward_extra_info"] = result["reward_extra_info"]
 

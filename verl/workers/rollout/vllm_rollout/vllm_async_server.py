@@ -202,7 +202,7 @@ class vLLMHttpServerBase:
         engine_kwargs = self.config.get("engine_kwargs", {}).get("vllm", {}) or {}
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
         if self.config.get("limit_images", None):  # support for multi-image data
-            engine_kwargs["limit_mm_per_prompt"] = {"image": self.config.get("limit_images")}
+            engine_kwargs["limit_mm_per_prompt"] = {"image": 20}
         if self.config.cudagraph_capture_sizes:
             engine_kwargs["cuda_graph_sizes"] = self.config.cudagraph_capture_sizes
 
@@ -400,11 +400,66 @@ class vLLMHttpServerBase:
         max_tokens = self.config.max_model_len - len(prompt_ids)
         sampling_params["logprobs"] = 0 if sampling_params.pop("logprobs", False) else None
         sampling_params.setdefault("repetition_penalty", self.config.get("repetition_penalty", 1.0))
+        # max_tokens = max(4096, max_tokens)
+
+        # processor = self.model_config.processor
+        # image_token_id = getattr(processor, "image_token_id", None)
+        # num_image_tokens_before = None
+        # if image_token_id is not None:
+        #     num_image_tokens_before = sum(1 for tid in prompt_ids if tid == image_token_id)
+        # num_images = len(image_data) if image_data is not None else 0
+        # print(
+        #     "[vllm] BEFORE dedup - "
+        #     f"len(prompt_ids)={len(prompt_ids)}, "
+        #     f"image_token_id={image_token_id}, "
+        #     f"num_image_tokens={num_image_tokens_before}, "
+        #     f"num_images_in_image_data={num_images}"
+        # )
+        # print('vllm max_model_len: ', self.config.max_model_len)
+        # print('vllm prompt_ids length: ', len(prompt_ids))
+        print('vllm max_tokens: ', max_tokens)
+
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = _qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
+
+        # num_image_tokens_after = None
+        # if image_token_id is not None:
+        #     num_image_tokens_after = sum(1 for tid in prompt_ids if tid == image_token_id)
+        # print(
+        #     "[vllm] AFTER dedup  - "
+        #     f"len(prompt_ids)={len(prompt_ids)}, "
+        #     f"num_image_tokens={num_image_tokens_after}, "
+        #     f"num_images_in_image_data={num_images}"
+        # )
+        # print('ImageData: ', image_data)
+        # print('PromptIDs: ', prompt_ids)
         prompt = TokensPrompt(
             prompt_token_ids=prompt_ids, multi_modal_data={"image": image_data} if image_data else None
         )
+
+        # Debug: 检查图片 token 和图片数量是否匹配
+        # if image_data is not None and processor is not None:
+        #     vision_start_id = processor.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+        #     vision_end_id = processor.tokenizer.convert_tokens_to_ids("<|vision_end|>")
+        #     image_pad_id = processor.image_token_id
+            
+        #     # 统计完整的 <|vision_start|>...<|vision_end|> 块数量
+        #     n_vision_blocks = 0
+        #     in_vision_block = False
+        #     for tid in prompt_ids:
+        #         if tid == vision_start_id:
+        #             in_vision_block = True
+        #         elif tid == vision_end_id and in_vision_block:
+        #             n_vision_blocks += 1
+        #             in_vision_block = False
+            
+        #     print(f"[vLLM DEBUG] num_images_in_data={len(image_data)}, num_vision_blocks_in_prompt={n_vision_blocks}")
+        #     if len(image_data) != n_vision_blocks:
+        #         print(f"[vLLM WARNING] 图片数量与 vision block 数量不匹配！这可能导致模型只能看到部分图片。")
+            
+        #     # 打印图片 token 的位置
+        #     vision_positions = [i for i, tid in enumerate(prompt_ids) if tid == vision_start_id]
+        #     print(f"[vLLM DEBUG] vision_start positions: {vision_positions}")
 
         # Add lora request
         lora_request = None
@@ -415,7 +470,10 @@ class vLLMHttpServerBase:
                 lora_request = LoRARequest(
                     lora_name=VLLM_LORA_NAME, lora_int_id=VLLM_LORA_INT_ID, lora_path=VLLM_LORA_PATH
                 )
-
+        # print('TokensPrompt: ', prompt)
+        # print('SamplingParams: ', sampling_params)
+        # print('RequestID: ', request_id)
+        # print('LoraRequest: ', lora_request)
         generator = self.engine.generate(
             prompt=prompt, sampling_params=sampling_params, request_id=request_id, lora_request=lora_request
         )

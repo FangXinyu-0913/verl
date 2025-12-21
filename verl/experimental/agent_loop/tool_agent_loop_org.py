@@ -16,8 +16,6 @@ import copy
 import json
 import logging
 import os
-import torch
-import time
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -36,23 +34,6 @@ from verl.utils.rollout_trace import rollout_trace_op
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
-import base64
-from io import BytesIO
-from PIL import Image
-
-def encode_image(image, format='PNG'):
-    # 创建内存字节流缓冲区
-    buffer = BytesIO()
-    # 保存图像到缓冲区（PNG 支持透明通道，无需转换模式）
-    image.save(buffer, format=format, optimize=True)  # optimize=True 优化 PNG 体积
-    # 重置指针到缓冲区开头
-    buffer.seek(0)
-    # Base64 编码
-    base64_code = base64.b64encode(buffer.read()).decode('utf-8')
-    # 拼接 PNG 格式的 data URI 前缀
-    data_uri = f'data:image/{format.lower()};base64,{base64_code}'
-    return data_uri
 
 class AgentState(Enum):
     PENDING = "pending"
@@ -90,7 +71,6 @@ class AgentData:
         self.response_logprobs: list[float] = []
         self.turn_scores: list[float] = []
         self.tool_rewards: list[float] = []
-        self.output_index: list[int] = []
         self.user_turns = 0
         self.assistant_turns = 0
 
@@ -99,11 +79,6 @@ class AgentData:
 
         # Extra fields for dynamic addition
         self.extra_fields: dict[str, Any] = {}
-        
-        # Multi-modal grids
-        self.image_grid_thw_list = []
-        self.video_grid_thw_list = []
-        self.second_per_grid_ts_list = []
 
 
 @register("tool_agent")
@@ -207,9 +182,7 @@ class ToolAgentLoop(AgentLoopBase):
             metrics=agent_data.metrics,
             extra_fields={},
         )
-
-        output.extra_fields.update({"turn_scores": agent_data.turn_scores, "tool_rewards": agent_data.tool_rewards, "output_index": agent_data.output_index})
-        # print(agent_data.turn_scores)
+        output.extra_fields.update({"turn_scores": agent_data.turn_scores, "tool_rewards": agent_data.tool_rewards})
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: dict[str, Any]) -> AgentState:
@@ -245,9 +218,6 @@ class ToolAgentLoop(AgentLoopBase):
     ) -> AgentState:
         """Handle the generating state: generate model response and check for tool calls."""
         add_messages: list[dict[str, Any]] = []
-        # if agent_data.user_turns >= 2:
-        #     print('agent_data.prompt_ids in generating state', agent_data.prompt_ids)
-        #     print('agent_data.image_data in generating state', agent_data.image_data, 'turn_num:', agent_data.user_turns)
 
         with simple_timer("generate_sequences", agent_data.metrics):
             output = await self.server_manager.generate(
@@ -273,7 +243,7 @@ class ToolAgentLoop(AgentLoopBase):
             return AgentState.TERMINATED
 
         # Extract tool calls
-        content, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
+        _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
 
         # Handle interaction if needed
         if self.interaction_config_file:
@@ -285,10 +255,6 @@ class ToolAgentLoop(AgentLoopBase):
 
         # Determine next state
         if agent_data.tool_calls:
-            response = self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
-            print('return language in correct invoke tool: ', response[:1000] + '...(truncated)...' + response[1000:])
-            print('agent_data.tool_calls in generating state: ', agent_data.tool_calls)
-            # print('content in extracting tool calls: ', content)
             return AgentState.PROCESSING_TOOLS
         elif self.interaction_config_file:
             return AgentState.INTERACTING
@@ -302,7 +268,7 @@ class ToolAgentLoop(AgentLoopBase):
 
         tasks = []
         tool_call_names = []
-        for tool_call in agent_data.tool_calls:
+        for tool_call in agent_data.tool_calls[: self.max_parallel_calls]:
             tasks.append(self._call_tool(tool_call, agent_data.tools_kwargs))
             tool_call_names.append(tool_call.name)
 
@@ -311,7 +277,6 @@ class ToolAgentLoop(AgentLoopBase):
 
         # Process tool responses and update multi_modal_data
         # Removed: agent_data.new_images_this_turn = []
-        print('responses_num: ', len(responses), 'tool_call num: ', len(agent_data.tool_calls))
         for tool_response, tool_reward, _ in responses:
             # Create message from tool response
             if tool_response.image or tool_response.video:
@@ -359,8 +324,6 @@ class ToolAgentLoop(AgentLoopBase):
 
             if tool_reward is not None:
                 agent_data.tool_rewards.append(tool_reward)
-            if tool_reward == 1.0 and 'The morphological classification of jigsaw piece' in tool_response.text:
-                agent_data.output_index.append(int(tool_response.text.split('The morphological classification of jigsaw piece ')[-1].strip().split(' ')[0]))
 
         agent_data.messages.extend(add_messages)
         # Update prompt with tool responses
@@ -424,29 +387,12 @@ class ToolAgentLoop(AgentLoopBase):
             interaction_responses,
             reward,
             metrics,
-            interaction_images
         ) = await agent_data.interaction.generate_response(
             agent_data.request_id, agent_data.messages, **agent_data.interaction_kwargs
         )
         agent_data.user_turns += 1
 
-        # Process interaction images (ensemble images from environment)
-        current_images = []
-        if interaction_images:
-            if isinstance(interaction_images, list):
-                for img in interaction_images:
-                    if img is not None:
-                        current_images.append(img)
-            else:
-                current_images.append(interaction_images)
-        # 这里我们采用标准的 multi-modal message 形式，
-        # interaction_responses 是纯文本，图片通过 {"type": "image"} 占位符添加。
-        content = []
-        content.append({"type": "text", "text": interaction_responses})
-        if current_images:
-            for _ in current_images:
-                content.append({"type": "image"})
-        add_messages = [{"role": "user", "content": content}]
+        add_messages: list[dict[str, Any]] = [{"role": "user", "content": interaction_responses}]
         agent_data.messages.extend(add_messages)
 
         if reward is not None:
@@ -463,38 +409,16 @@ class ToolAgentLoop(AgentLoopBase):
                     **self.apply_chat_template_kwargs,
                 ),
             )
-            # 传入 current_images 以便 processor 正确计算 token ids (包括插入 image token)
-            # print('raw_user_response in interacting state:\n', raw_user_response)
-            # print('current_images in interacting state:', current_images)
-            model_inputs = self.processor(
-                text=[raw_user_response],
-                images=current_images if current_images else None,
-                return_tensors="pt",
-            )
-            # 记录 image_grid_thw，后续在 _agent_loop_postprocess 中使用，避免重新计算导致 shape mismatch
-            # if "image_grid_thw" in model_inputs:
-            #     agent_data.image_grid_thw_list.append(model_inputs["image_grid_thw"])
-            # if "video_grid_thw" in model_inputs:
-            #     agent_data.video_grid_thw_list.append(model_inputs["video_grid_thw"])
-            # if "second_per_grid_ts" in model_inputs:
-            #     agent_data.second_per_grid_ts_list.append(model_inputs["second_per_grid_ts"])
+            model_inputs = self.processor(text=[raw_user_response], images=None, return_tensors="pt")
             response_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
-            if current_images:
-                if agent_data.image_data is None:
-                    agent_data.image_data = []
-                elif not isinstance(agent_data.image_data, list):
-                    agent_data.image_data = [agent_data.image_data]
-                agent_data.image_data.extend(current_images)
         else:
             response_ids = await self.loop.run_in_executor(
                 None,
                 lambda: self.tokenizer.apply_chat_template(add_messages, add_generation_prompt=True, tokenize=True),
             )
-        # print('length of system prompt', len(self.system_prompt))
         response_ids = response_ids[len(self.system_prompt) :]
 
         # Update prompt_ids and response_mask
-        # mask=0 是正确的，代表这部分 token (User Input) 不需要计算 loss，仅作为 Context
         agent_data.prompt_ids += response_ids
         agent_data.response_mask += [0] * len(response_ids)
         if agent_data.response_logprobs:
@@ -534,7 +458,6 @@ class ToolAgentLoop(AgentLoopBase):
                 await tool.release(instance_id)
 
         tool_response_text = tool_execution_response.text
-        print(f'{instance_id}, tool_response_text in _call_tool: {tool_response_text}')
         if tool_response_text and len(tool_response_text) > self.max_tool_response_length:
             if self.tool_response_truncate_side == "left":
                 tool_response_text = tool_response_text[: self.max_tool_response_length] + "...(truncated)"
@@ -548,12 +471,11 @@ class ToolAgentLoop(AgentLoopBase):
         tool_response_kwargs = {"text": tool_response_text}
 
         # Add multimedia data if present
-        if tool_reward == 1.0:
-            for attr_name in ["image", "video"]:
-                if hasattr(tool_execution_response, attr_name):
-                    attr_value = getattr(tool_execution_response, attr_name)
-                    if attr_value is not None:
-                        tool_response_kwargs[attr_name] = attr_value
+        for attr_name in ["image", "video"]:
+            if hasattr(tool_execution_response, attr_name):
+                attr_value = getattr(tool_execution_response, attr_name)
+                if attr_value is not None:
+                    tool_response_kwargs[attr_name] = attr_value
 
         return ToolResponse(**tool_response_kwargs), tool_reward, res
 

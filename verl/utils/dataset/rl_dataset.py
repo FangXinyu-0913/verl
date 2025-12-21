@@ -128,8 +128,9 @@ class RLHFDataset(Dataset):
                 logger.warning("Failed to initialize tools from %s: %s", self.tool_config_path, e)
                 self.tool_schemas = None
 
-        self.num_workers = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
-        self.num_workers = min(self.num_workers, os.cpu_count()) if self.num_workers is not None else None
+        # self.num_workers = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
+        # self.num_workers = min(self.num_workers, os.cpu_count()) if self.num_workers is not None else None
+        self.num_workers = 16
         self.use_shm = config.get("use_shm", False)
         self.chat_template_func = config.get("chat_template_func", None)
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)

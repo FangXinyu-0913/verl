@@ -18,7 +18,7 @@ export VLLM_ALLREDUCE_USE_SYMM_MEM=0 # for vllm0.11.0 with TP
 
 
 # HF_MODEL_PATH=${HF_MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen3-VL-8B-Instruct"}
-HF_MODEL_PATH="/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/verl/checkpoints/verl_grpo_jigsaw_example500/qwen3_vl_8b_megatron_shape/global_step_240/actor/huggingface"
+HF_MODEL_PATH="/mnt/shared-storage-user/large-model-center-share-weights/hf_hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/cadac78306af287f801b75a5565ede58f323f472"
 
 
 GEN_TP=${GEN_TP:-1}
@@ -26,15 +26,15 @@ CP=${CP:-2}
 TP=${TP:-4}
 PP=${PP:-1}
 
-train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train.parquet'
-test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test.parquet'
+train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train_four_pieces_no_shape_resolution448.parquet'
+test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test_four_pieces_no_shape_resolution448.parquet'
 
 python3 -m verl.trainer.main_ppo --config-path=config \
     --config-name='ppo_megatron_trainer.yaml'\
     algorithm.adv_estimator=grpo \
     data.train_files="$train_path" \
     data.val_files="$test_path" \
-    data.train_batch_size=64 \
+    data.train_batch_size=32 \
     data.max_prompt_length=9192 \
     data.max_response_length=9192 \
     data.filter_overlong_prompts=False \
@@ -42,7 +42,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     actor_rollout_ref.actor.checkpoint.save_contents="['model']" \
     actor_rollout_ref.model.path=$HF_MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=$PP \
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size=$TP \
@@ -80,10 +80,10 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.logger='["console","tensorboard"]' \
-    trainer.project_name='verl_grpo_jigsaw_example500' \
-    trainer.experiment_name='qwen3_vl_8b_megatron_resume_from_shape_just_test' \
+    trainer.project_name='verl_grpo_jigsaw_four_pieces' \
+    trainer.experiment_name='qwen3_vl_8b_megatron_four_pieces_no_shape_from_scratch_completely' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=5 \
-    trainer.test_freq=15 \
+    trainer.save_freq=50 \
+    trainer.test_freq=10 \
     trainer.total_epochs=3 $@

@@ -1,0 +1,4 @@
+interaction:
+  - name: "jigsaw"
+    class_name: "verl.interactions.jigsaw_interaction.JigSawInteraction"
+    config: {}

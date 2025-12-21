@@ -1,0 +1,21 @@
+tools:
+  - class_name: "verl.tools.jigsaw_simple_restoration_tool.JigsawSimpleRestorationTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "jigsaw_restoration_tool"
+        description: "Restores the jigsaw puzzle by identifying which piece belongs to each position in the solved puzzle."
+        parameters:
+          type: "object"
+          properties:
+            order:
+              type: "array"
+              items:
+                type: "integer"
+                description: "The index of the piece that belongs to the position in the solved puzzle."
+              minItems: 4
+              maxItems: 4
+              description: "A list of indices representing the solution sequence. The list index corresponds to the TARGET slot in the restored puzzle (0: top-left, 1: top-right, 2: bottom-left, 3: bottom-right). The value is the index of the piece that belongs in that slot."
+          required: ["order"]

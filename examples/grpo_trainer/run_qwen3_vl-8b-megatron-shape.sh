@@ -18,7 +18,7 @@ export VLLM_ALLREDUCE_USE_SYMM_MEM=0 # for vllm0.11.0 with TP
 
 
 # HF_MODEL_PATH=${HF_MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen3-VL-8B-Instruct"}
-HF_MODEL_PATH="/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/verl/checkpoints/verl_grpo_jigsaw_example500/qwen3_vl_8b_megatron_shape/global_step_240/actor/huggingface"
+HF_MODEL_PATH="/mnt/shared-storage-user/large-model-center-share-weights/hf_hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/cadac78306af287f801b75a5565ede58f323f472"
 
 
 GEN_TP=${GEN_TP:-1}
@@ -26,8 +26,8 @@ CP=${CP:-2}
 TP=${TP:-4}
 PP=${PP:-1}
 
-train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train.parquet'
-test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test.parquet'
+train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train_only_shape_analysis.parquet'
+test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test_only_shape_analysis.parquet'
 
 python3 -m verl.trainer.main_ppo --config-path=config \
     --config-name='ppo_megatron_trainer.yaml'\
@@ -81,9 +81,9 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     trainer.critic_warmup=0 \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name='verl_grpo_jigsaw_example500' \
-    trainer.experiment_name='qwen3_vl_8b_megatron_resume_from_shape_just_test' \
+    trainer.experiment_name='qwen3_vl_8b_megatron_shape' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=5 \
+    trainer.save_freq=15 \
     trainer.test_freq=15 \
-    trainer.total_epochs=3 $@
+    trainer.total_epochs=5 $@

@@ -1,0 +1,394 @@
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Copyright 2023-2024 SGLang Team
+# Copyright 2025 ModelBest Inc. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import logging
+import os
+from typing import Any, Optional
+from uuid import uuid4
+
+from verl.utils.reward_score import jigsaw
+
+from .base import BaseInteraction
+
+logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+
+import argparse
+import json
+import math
+import os
+from typing import List, Tuple, Dict, Optional
+from PIL import Image, ImageDraw
+
+def _build_rowwise_order_from_centers(
+    centers: List[Tuple[float, float]],
+    rows_hint: Optional[int] = None,
+) -> List[int]:
+    """
+    根据中心点坐标，将拼图块按“从上到下、从左到右”的顺序排序，返回索引列表。
+    """
+    n = len(centers)
+    if n == 0:
+        return []
+    ys = [c[1] for c in centers]
+    min_y, max_y = min(ys), max(ys)
+    
+    if rows_hint is None or rows_hint <= 0:
+        rows = max(1, int(round(math.sqrt(n))))
+    else:
+        rows = max(1, rows_hint)
+
+    row_buckets: List[List[int]] = [[] for _ in range(rows)]
+    span_y = max_y - min_y
+    if span_y < 1e-6:
+        return sorted(range(n), key=lambda i: centers[i][0])
+
+    for i, (_, cy) in enumerate(centers):
+        t = (cy - min_y) / span_y
+        row_idx = int(round(t * (rows - 1)))
+        if row_idx < 0:
+            row_idx = 0
+        if row_idx >= rows:
+            row_idx = rows - 1
+        row_buckets[row_idx].append(i)
+
+    order: List[int] = []
+    for r in range(rows):
+        row = row_buckets[r]
+        if not row:
+            continue
+        row.sort(key=lambda i: centers[i][0])  # 同一行按 x 从小到大
+        order.extend(row)
+    return order
+
+def reassemble_jigsaw(
+    puzzle_dir: str,
+    order: List[int],
+    puzzle_type: str,
+    bg_color: Tuple[int, int, int, int] = (255, 255, 255, 255)
+):
+    """
+    根据给定的顺序将 puzzle_dir 中的碎片重新拼合。
+    
+    :param puzzle_dir: 包含 pieces 图片和 meta json 的文件夹路径
+    :param order: 拼图块 Board ID 的列表。order[i] 表示在恢复后的第 i 个位置（从左上角开始行优先），
+                  应该放置 Board ID 为 order[i] 的块。
+    :param puzzle_type: 拼图类型 ('rect', 'grid', 'hex')
+    """
+    
+    # 1. 根据类型确定 meta json 文件名
+    if puzzle_type == "rect":
+        meta_filename = "rect_pieces_meta.json"
+    elif puzzle_type == "grid":
+        meta_filename = "grid_pieces_meta.json"
+    elif puzzle_type == "hex":
+        meta_filename = "hex_pieces_meta.json"
+    else:
+        # 尝试自动寻找
+        found = False
+        for suffix in ["rect", "grid", "hex"]:
+            fname = f"{suffix}_pieces_meta.json"
+            if os.path.exists(os.path.join(puzzle_dir, fname)):
+                meta_filename = fname
+                puzzle_type = suffix
+                found = True
+                break
+        if not found:
+             # 最后尝试寻找任意 _pieces_meta.json
+            for fname in os.listdir(puzzle_dir):
+                if fname.endswith("_pieces_meta.json"):
+                    meta_filename = fname
+                    break
+            if not meta_filename:
+                raise FileNotFoundError(f"在 {puzzle_dir} 中未找到合适的 *_pieces_meta.json 文件，请检查 --type 参数")
+
+    meta_path = os.path.join(puzzle_dir, meta_filename)
+    # print(f"[Info] 使用元数据文件: {meta_path}")
+    
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+        
+    width = meta["image_width"]
+    height = meta["image_height"]
+    pieces_meta = meta["pieces"]
+    solution = meta["solution"]  # solution[k] 是正确放置在第 k 个槽位的拼图块的 board_id
+    
+    # 2. 确定 槽位索引 (Slot Index) 到 pieces 列表索引 (Original Index) 的映射
+    # sol_indices[k] = index_in_pieces_list
+    # 表示第 k 个视觉槽位对应 meta['pieces'] 中的第几个元素
+    
+    centers = [(p["center"][0], p["center"][1]) for p in pieces_meta]
+    
+    if puzzle_type == "hex":
+        rings = meta.get("rings", 0)
+        rows_hint = 2 * rings - 1 if rings > 0 else None
+        sol_indices = _build_rowwise_order_from_centers(centers, rows_hint=rows_hint)
+    else:
+        # Rect 和 Grid 生成时，pieces 列表已经是按行优先顺序排列
+        sol_indices = list(range(len(pieces_meta)))
+
+    # 3. 检查输入 order 的格式 (0-based vs 1-based)
+    if not order:
+        print("[警告] 输入的 order 为空")
+        return
+
+    # 收集所有合法的 board_id
+    valid_board_ids = set(solution)
+    
+    # 强制 1-based 索引策略：0 视为占位符
+    using_zero_based = False
+    if 0 in order:
+         print("[提示] 检测到 0 (作为空白占位符)，将跳过该位置的填充并绘制轮廓。")
+        
+    # 4. 创建画布并拼图
+    canvas = Image.new("RGBA", (width, height), bg_color)
+    draw = ImageDraw.Draw(canvas)
+    loaded_images = {}
+
+    # 遍历输入顺序，slot_idx 是重建图的槽位下标 (0, 1, 2...)
+    # val 是用户/模型认为该槽位应该放置的 Board ID
+    for slot_idx, val in enumerate(order):
+        if slot_idx >= len(sol_indices):
+            break
+            
+        target_board_id = val + 1 if using_zero_based else val
+        
+        # 4.1 确定目标粘贴位置
+        # 重建图的第 slot_idx 个位置，对应的 pieces 索引是 sol_indices[slot_idx]
+        target_meta_idx = sol_indices[slot_idx]
+        target_piece_data = pieces_meta[target_meta_idx]
+        target_center = target_piece_data["center"]
+        target_cx, target_cy = target_center[0], target_center[1]
+        
+        # 如果是 0，绘制空白轮廓
+        if val == 0:
+            # 估算该位置的块大小（使用 bbox）
+            # bbox = target_piece_data.get("bbox")
+            # if bbox:
+            #     bw = bbox[2] - bbox[0]
+            #     bh = bbox[3] - bbox[1]
+            # else:
+            #     # 兜底：均分画布
+            #     n_pieces = len(pieces_meta)
+            #     bw = width / math.sqrt(n_pieces)
+            #     bh = height / math.sqrt(n_pieces)
+
+            # # 统一缩放
+            # scale_factor = 0.75
+            # final_w = bw * scale_factor
+            # final_h = bh * scale_factor
+
+            # # 计算在画布上的绘制中心（假设放在正确位置）
+            # # 新坐标 = 画布中心 + (原坐标 - 画布中心) * scale_factor
+            # canvas_cx = width / 2.0
+            # canvas_cy = height / 2.0
+            # final_cx = canvas_cx + (target_cx - canvas_cx) * scale_factor
+            # final_cy = canvas_cy + (target_cy - canvas_cy) * scale_factor
+            
+            # x0 = final_cx - final_w / 2.0
+            # y0 = final_cy - final_h / 2.0
+            # x1 = final_cx + final_w / 2.0
+            # y1 = final_cy + final_h / 2.0
+            
+            # draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0, 255), width=8)
+            continue
+
+        # 4.2 找到 target_board_id 对应的拼图文件
+
+        # 逻辑：
+        # solution[k] 表示：在正确解答中，第 k 个槽位放置的是 board_id = solution[k]
+        # 因此，board_id = B 的拼图块，原本应该放置在 k = solution.index(B) 这个槽位
+        # 这个拼图块的数据位于 pieces[sol_indices[k]]
+        
+        try:
+            # 找到 target_board_id 原本属于哪个槽位 (k)
+            original_slot_k = solution.index(target_board_id)
+        except ValueError:
+            print(f"[跳过] 无法在 solution 中找到 board_id={target_board_id} (slot_idx={slot_idx})")
+            continue
+            
+        # 获取该块的文件信息
+        source_meta_idx = sol_indices[original_slot_k]
+        source_piece_data = pieces_meta[source_meta_idx]
+        filename = source_piece_data["filename"]
+        
+        # 加载图片
+        if filename not in loaded_images:
+            p_path = os.path.join(puzzle_dir, filename)
+            if not os.path.exists(p_path):
+                print(f"[错误] 文件不存在: {p_path}")
+                continue
+            img = Image.open(p_path).convert("RGBA")
+            loaded_images[filename] = img
+        
+        img = loaded_images[filename]
+        
+        # 检查是否放置在正确位置
+        # slot_idx 是当前位置的逻辑索引 (0, 1, 2...)
+        # target_board_id 是预测放置在该位置的 board_id
+        # solution[slot_idx] 是该位置真正应该放置的 board_id (从 meta solution 读取)
+        
+        is_correct = False
+        if slot_idx < len(solution):
+            true_board_id = solution[slot_idx]
+            if target_board_id == true_board_id:
+                is_correct = True
+        
+        # 统一缩放所有拼图块，无论正确与否
+        scale_factor = 0.75
+        new_w = int(img.width * scale_factor)
+        new_h = int(img.height * scale_factor)
+        if new_w > 0 and new_h > 0:
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        w, h = img.size
+        
+        # 计算粘贴坐标
+        if is_correct:
+            # 正确位置：将坐标也向画布中心缩放，使得缩小的图片能无缝拼合
+            # 新坐标 = 画布中心 + (原坐标 - 画布中心) * scale_factor
+            canvas_cx = width / 2.0
+            canvas_cy = height / 2.0
+            final_cx = canvas_cx + (target_cx - canvas_cx) * scale_factor
+            final_cy = canvas_cy + (target_cy - canvas_cy) * scale_factor
+        else:
+            # 错误位置：保持原坐标不变。因为图片变小了，自然会与周边产生留白
+            final_cx = target_cx
+            final_cy = target_cy
+            
+        # 计算粘贴位置：使图片中心对齐目标中心
+        paste_x = int(round(final_cx - w / 2.0))
+        paste_y = int(round(final_cy - h / 2.0))
+        
+        canvas.paste(img, (paste_x, paste_y), mask=img)
+
+    canvas.thumbnail((1024, 1024))
+
+    return canvas
+
+def generate_image_with_current_answer(solution_str, ground_truth):
+    # 检查 content 是否为空
+    if not solution_str:
+        return None, None
+    if '<Final Answer>' in solution_str:
+        try:
+            raw_answer = solution_str.split('<Final Answer>')[-1].split('</Final Answer>')[0]
+            cleaned = raw_answer.replace('(', '').replace(')', '').split(',')
+            coords = [int(x.strip()) for x in cleaned if x.strip()]
+            final_answer = []
+            idx_list = []
+            # 每次取两个数 (row, col)
+            for i in range(0, len(coords), 2):
+                if i + 1 < len(coords):
+                    r, c = coords[i], coords[i+1]
+                    # (1,1)->1, (1,2)->2, (2,1)->3, (2,2)->4
+                    linear_idx = (r - 1) * 2 + c
+                    final_answer.append(linear_idx)
+            if len(final_answer) == len(ground_truth['solution']):
+                for id_1, id_2 in zip(final_answer, ground_truth['solution']):
+                    if id_1 == id_2:
+                        idx_list.append(True)
+                    else:
+                        idx_list.append(False)
+            ensemble_image = reassemble_jigsaw(ground_truth['root_path'], final_answer, ground_truth['type'])
+            return raw_answer, ensemble_image, idx_list
+        except Exception as e:
+            print(f'Error in final answer, failed to generate image: {e}, org solution: {solution_str[:200]}')
+            return None, None, None
+
+    print("Warning: <Final Answer> tag not found in solution_str.")
+    return None, None, None
+
+
+
+class JigSawWithImageInteraction(BaseInteraction):
+    """A demo interaction for calculating the reward of jigsaw.
+
+    - `start_interaction`: start a interaction instance for a trajectory.
+    - `generate_response`: generate the response of the assistant.
+    - `calculate_score`: calculate the score of the interaction.
+    - `finalize_interaction`: finalize the interaction instance.
+    """
+
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self._instance_dict = {}
+
+    async def start_interaction(
+        self, instance_id: Optional[str] = None, ground_truth: Optional[str] = None, **kwargs
+    ) -> str:
+        if instance_id is None:
+            instance_id = str(uuid4())
+        self._instance_dict[instance_id] = {
+            "response": "",
+            "ground_truth": ground_truth,
+            "reward": 0.0,
+        }
+        return instance_id
+
+    async def generate_response(
+        self, instance_id: str, messages: list[dict[str, Any]], **kwargs
+    ) -> tuple[bool, str, float, dict, Optional[Any]]:
+        content = ""
+        for i in range(len(messages) - 1, -1, -1):
+            item = messages[i]
+            if item.get("role") == "assistant":
+                content = item.get("content")
+                break
+
+        self._instance_dict[instance_id]["response"] = content
+
+        reward, format_score, final_answer_score = await self.calculate_score(instance_id)
+        curr_answer, ensemble_image, idx_list = generate_image_with_current_answer(content, self._instance_dict[instance_id]["ground_truth"])
+        ensemble_image = None
+        curr_answer = str(curr_answer).replace('\n', '')
+        # ensemble_image = Image.open('/mnt/shared-storage-user/fangxinyu/vlmevalkit_develop/VLMEvalKit/assets/apple.jpg')
+        if reward == 1.0 and curr_answer is not None:
+            response = f"Your response is correct! Your final answer is {curr_answer}. "
+            should_terminate_sequence = True
+        else:
+            response = "Your response is incorrect! You need to reflect on your answer and try again. "
+            # response += "First, you have to tell me how many images you see in this conversation, and the difference between these images. Have you seen any fruits in the last image I give to you?"
+            if format_score != 1.0:
+                response += "Please use the format provided to you to think and then generate your final answer. "
+            # if shape_score != 1.0:
+            #     response += "Please reflect on the shape analysis (each edge innie/outie attributes) to help generate your final answer."
+            if final_answer_score != 1.0:
+                # response += f"Then think more detailedly with the images I give to you."
+                if curr_answer is not None:
+                    response += f"Your current answer {curr_answer} correctly identifies {final_answer_score * 4} jigsaw piece positions. "
+                    if idx_list is not None and len(idx_list) > 0:
+                        response += f"The correct information corresponding to the position of your current answer is {idx_list}. Please revise your answer according to this information."
+                else:
+                    response += f"Your current answer does not meet the output format. Please try again."
+            should_terminate_sequence = False
+
+        
+        if ensemble_image is not None and not should_terminate_sequence:
+            response += f"Here is the image of your current answer, shown below. And the original jigsaw board is shown in the beginning of this conversation."
+        print(f"Response for this iteraction: {response}")
+        # print('reward: ', reward)
+        return should_terminate_sequence, response, reward, {}, ensemble_image
+
+    async def calculate_score(self, instance_id: str, **kwargs) -> float:
+        return jigsaw.compute_score(
+            self._instance_dict[instance_id]["response"],
+            self._instance_dict[instance_id]["ground_truth"],
+            format_score_percent=0.1,
+            shape_score_percent=0.0
+        )
+
+    async def finalize_interaction(self, instance_id: str, **kwargs) -> None:
+        del self._instance_dict[instance_id]

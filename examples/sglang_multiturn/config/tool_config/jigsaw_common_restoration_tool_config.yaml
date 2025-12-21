@@ -1,0 +1,23 @@
+tools:
+  - class_name: "verl.tools.jigsaw_restoration_tool.JigsawRestorationTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "jigsaw_restoration_tool"
+        description: "Restores a 4x4 jigsaw puzzle visualization based on the provided sequence of tiles."
+        parameters:
+          type: "object"
+          properties:
+            order:
+              type: "array"
+              items:
+                type: "integer"
+                minimum: 0
+                maximum: 16
+                description: "The ID of the input tile (1-16) to place at this position. Use 0 if the position is currently empty/unknown."
+              minItems: 16
+              maxItems: 16
+              description: "A list of exactly 16 integers representing the 4x4 grid in raster-scan order (Row-major). Index 0 is Top-Left (Row 1, Col 1), Index 3 is Top-Right (Row 1, Col 4), Index 12 is Bottom-Left (Row 4, Col 1), and Index 15 is Bottom-Right (Row 4, Col 4)."
+          required: ["order"]

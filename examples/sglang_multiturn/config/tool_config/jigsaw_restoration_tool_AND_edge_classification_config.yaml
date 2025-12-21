@@ -1,0 +1,40 @@
+tools:
+  - class_name: "verl.tools.jigsaw_concat_tool.JigsawRestorationTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "jigsaw_restoration_tool"
+        description: "Restores the jigsaw puzzle by identifying which piece from the current board belongs to each position in the solved puzzle."
+        parameters:
+          type: "object"
+          properties:
+            order:
+              type: "array"
+              items:
+                type: "array"
+                items:
+                  type: "integer"
+                minItems: 2
+                maxItems: 2
+                description: "The (row, col) coordinate of the piece on the CURRENT board. The coordinates is 1-based."
+              minItems: 4
+              maxItems: 4
+              description: "A list of coordinates representing the solution sequence in row-major order. The list index corresponds to the TARGET slot in the restored puzzle (0: top-left, 1: top-right, 2: bottom-left, 3: bottom-right). The value at each index is the (row, col) coordinate of the piece on the CURRENT board that belongs in that slot. The coordinates is 1-based."
+          required: ["order"]
+  - class_name: "verl.tools.jigsaw_outie_innie_tool.JigsawPieceEdgeClassifierTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "jigsaw_piece_edge_classifier"
+        description: "Records the morphological classification (innie, outie, or flat) for each of the four edges of a specific jigsaw puzzle piece."
+        parameters:
+          type: "object"
+          properties:
+            piece_idx:
+              type: "integer"
+              description: "The 1-based index of the puzzle piece being analyzed."
+          required: ["piece_idx"]

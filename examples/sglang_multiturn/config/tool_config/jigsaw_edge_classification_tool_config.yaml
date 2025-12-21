@@ -1,0 +1,16 @@
+tools:
+  - class_name: "verl.tools.jigsaw_outie_innie_tool.JigsawPieceEdgeClassifierTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "jigsaw_piece_edge_classifier"
+        description: "Records the morphological classification (innie, outie, or flat) for each of the four edges of a specific jigsaw puzzle piece."
+        parameters:
+          type: "object"
+          properties:
+            piece_idx:
+              type: "integer"
+              description: "The 1-based index of the puzzle piece being analyzed."
+          required: ["piece_idx"]

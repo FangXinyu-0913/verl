@@ -1,33 +1,27 @@
 set -x
-ENGINE=${1:-vllm}
+# ENGINE=${1:-vllm}
 
 export NCCL_TIMEOUT=1800
 export TORCH_DISTRIBUTED_TIMEOUT=1800
 export TORCH_NCCL_BLOCKING_WAIT=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1 # For megatron communication/computation overlapping
 
-# dependency: vllm>=0.11.0, megatron-lm>=0.13, mbridge with qwen3vl_cp branch
-# environment option1: use a stable container later than docker://verlai/verl:vllm011.dev6 
-    # and install mbridge in it by following the instruction in the container
-            # pip remove mbridge if you have installed it
-            # pip install git+https://github.com/ISEEKYAN/mbridge.git@qwen3vl_cp # for correct mbridge
-# environment option2: use container docker://verlai/verl:vllm011.dev_qwenvl_cp
  
 
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0 # for vllm0.11.0 with TP
 
 
 # HF_MODEL_PATH=${HF_MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen3-VL-8B-Instruct"}
-HF_MODEL_PATH="/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/verl/checkpoints/verl_grpo_jigsaw_example500/qwen3_vl_8b_megatron_shape/global_step_240/actor/huggingface"
-
+HF_MODEL_PATH="/mnt/shared-storage-user/large-model-center-share-weights/hf_hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/cadac78306af287f801b75a5565ede58f323f472"
+# HF_MODEL_PATH= "/mnt/shared-storage-user/mllm/fangxinyu/hub/models--Qwen--Qwen2.5-VL-7B-Instruct"
 
 GEN_TP=${GEN_TP:-1}
 CP=${CP:-2}
 TP=${TP:-4}
 PP=${PP:-1}
 
-train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train.parquet'
-test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test.parquet'
+train_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/train_image_desc.parquet'
+test_path='/mnt/shared-storage-user/fangxinyu/jigsaw_project/RealJigsaw-RL/get_data/train_data/test_image_desc.parquet'
 
 python3 -m verl.trainer.main_ppo --config-path=config \
     --config-name='ppo_megatron_trainer.yaml'\
@@ -59,7 +53,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=9192 \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=9192 \
-    actor_rollout_ref.rollout.name=$ENGINE \
+    actor_rollout_ref.rollout.name=sglang \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.disable_mm_preprocessor_cache=True \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.n=4 \
@@ -81,9 +75,9 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     trainer.critic_warmup=0 \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name='verl_grpo_jigsaw_example500' \
-    trainer.experiment_name='qwen3_vl_8b_megatron_resume_from_shape_just_test' \
+    trainer.experiment_name='qwen3_vl_8b_megatron_shape' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=5 \
+    trainer.save_freq=15 \
     trainer.test_freq=15 \
-    trainer.total_epochs=3 $@
+    trainer.total_epochs=5 $@
