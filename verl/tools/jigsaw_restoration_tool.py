@@ -104,6 +104,7 @@ class JigsawRestorationTool(BaseTool):
             if len(final_answer) == 16 and all(0 <= x <= 16 for x in final_answer) and not has_duplicate_ignore_zero(final_answer):
                 canvas = reassemble_jigsaw(gt_folder, final_answer, 'rect', target_resolution)
             else:
+                print(f'The puzzle is failed and cannot be reconstructed according to the given answers={order}. Please observe carefully and reconsider.')
                 canvas = None
         except Exception as e:
             print(f'Error when executing tool: {e}, order: {order}')

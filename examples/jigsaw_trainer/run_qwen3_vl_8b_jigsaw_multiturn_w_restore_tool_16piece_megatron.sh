@@ -45,6 +45,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
+    +actor_rollout_ref.rollout.engine_kwargs.vllm.disable_mm_preprocessor_cache=True \
     actor_rollout_ref.rollout.response_length=16384 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
     actor_rollout_ref.rollout.n=4 \
@@ -69,7 +70,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name='qwen3_vl_8b_megatron_w_restoration_tool_16_pieces' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=60 \
+    trainer.save_freq=100 \
     trainer.val_before_train=False \
     trainer.test_freq=10 \
     data.train_files=/mnt/shared-storage-user/mllm/fangxinyu/jigsaw/train_data_for_verl/train_16_pieces_no_shape_resolution448_w_restore_tool.parquet \

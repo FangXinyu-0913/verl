@@ -124,11 +124,16 @@ def compute_score(solution_str, ground_truth, format_score_percent=0.1, shape_sc
             final_answer_score = 0
 
     
-    # print('format_score: ', format_score, format_score_percent)
+    print('format_score: ', format_score)
     # print('shape_score: ', shape_score)
-    # print('final_answer_score: ', final_answer_score, (1 - format_score_percent))
+    try:
+        print('final answer: ', final_answer)
+        print('gt final answer: ', gt_final_answer)
+    except Exception as e:
+        print(f'Error in final answer in final: {e}, org solution: {solution_str[:2000]}')
+    print('final_answer_score: ', final_answer_score) 
     # print('final score: ', format_score_percent * format_score + (1 - format_score_percent) * final_answer_score)
-
+    
     return format_score_percent * format_score + (1 - format_score_percent) * final_answer_score
 
     # answer = extract_solution(solution_str=solution_str, method=method)

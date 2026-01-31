@@ -206,6 +206,7 @@ def compute_score(solution_str, ground_truth, extra_info):
             tool_score = 0.8
         if final_answer_score > 0.8:
             tool_score = 1
+    # print('extra_info: ', extra_info)
 
 
     print('tool_score: ', tool_score)

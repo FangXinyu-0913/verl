@@ -50,7 +50,7 @@ def default_compute_score(
         from . import gsm8k
 
         res = gsm8k.compute_score(solution_str, ground_truth)
-    elif data_source == "unsplash/jigsaw" or data_source == "unsplash/jigsaw_sixteen":
+    elif data_source == "unsplash/jigsaw" or data_source == "unsplash/jigsaw_sixteen" or data_source == "unsplash/jigsaw_mix":
         from . import jigsaw
 
         res = jigsaw.compute_score(solution_str, ground_truth)
